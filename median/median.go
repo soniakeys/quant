@@ -12,7 +12,7 @@ import (
 	"sort"
 )
 
-type Quantizer struct {}
+type Quantizer struct{}
 
 // Quantize implements median cut color quantization.
 //
@@ -23,7 +23,9 @@ func (Quantizer) Quantize(img image.Image, n int) *image.Paletted {
 		n = 256
 	}
 	qz := newQuantizer(img, n)
-	qz.cluster()         // cluster pixels by color
+	if n > 1 {
+		qz.cluster() // cluster pixels by color
+	}
 	return qz.paletted() // generate paletted image from clusters
 }
 
@@ -49,6 +51,9 @@ const ( // w const
 )
 
 func newQuantizer(img image.Image, nq int) *quantizer {
+	if nq < 1 {
+		return &quantizer{img: img}
+	}
 	b := img.Bounds()
 	npx := (b.Max.X - b.Min.X) * (b.Max.Y - b.Min.Y)
 	qz := &quantizer{
