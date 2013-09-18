@@ -19,6 +19,9 @@ type Quantizer struct {}
 // Argument n is the desired number of colors.  Returned is a paletted
 // image with no more than n colors.
 func (Quantizer) Quantize(img image.Image, n int) *image.Paletted {
+	if n > 256 {
+		n = 256
+	}
 	qz := newQuantizer(img, n)
 	qz.cluster()         // cluster pixels by color
 	return qz.paletted() // generate paletted image from clusters
