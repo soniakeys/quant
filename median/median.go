@@ -10,15 +10,19 @@ import (
 	"image/color"
 	"math"
 	"sort"
+
+    "github.com/soniakeys/quant"
 )
 
 type Quantizer struct{}
+
+var _ quant.Quantizer = Quantizer{}
 
 // Quantize implements median cut color quantization.
 //
 // Argument n is the desired number of colors.  Returned is a paletted
 // image with no more than n colors.
-func (Quantizer) Quantize(img image.Image, n int) *image.Paletted {
+func (Quantizer) Image(img image.Image, n int) *image.Paletted {
 	if n > 256 {
 		n = 256
 	}
@@ -27,6 +31,14 @@ func (Quantizer) Quantize(img image.Image, n int) *image.Paletted {
 		qz.cluster() // cluster pixels by color
 	}
 	return qz.paletted() // generate paletted image from clusters
+}
+
+func (Quantizer) Palette(img image.Image, n int) quant.Palette {
+    qz := newQuantizer(img, n)
+    if n > 1 {
+        qz.cluster() // cluster pixels by color
+    }
+    return qz.palette()
 }
 
 type quantizer struct {
@@ -255,6 +267,29 @@ func (qz *quantizer) paletted() *image.Paletted {
 		}
 	}
 	return pi
+}
+
+func (qz *quantizer) palette() quant.Palette {
+    cp := make(color.Palette, len(qz.cs))
+    for i := range qz.cs {
+        px := qz.cs[i].px
+        // Average values in cluster to get palette color.
+        var rsum, gsum, bsum int64
+        for _, p := range px {
+            r, g, b, _ := qz.img.At(int(p.x), int(p.y)).RGBA()
+            rsum += int64(r)
+            gsum += int64(g)
+            bsum += int64(b)
+        }
+        n64 := int64(len(px) << 8)
+        cp[i] = color.RGBA{
+            uint8(rsum / n64),
+            uint8(gsum / n64),
+            uint8(bsum / n64),
+            0xff,
+        }
+    }
+    return quant.LinearPalette{cp}
 }
 
 // Implement sort.Interface for sort in median algorithm.
