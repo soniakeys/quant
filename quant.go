@@ -7,6 +7,7 @@ package quant
 import (
 	"image"
 	"image/color"
+	"image/draw"
 )
 
 // Quantizer defines a color quantizer for images.
@@ -40,7 +41,44 @@ func (p LinearPalette) ColorPalette() color.Palette {
 	return p.Palette
 }
 
-func Dither(i0 image.Image, p Palette) *image.Paletted {
+type Dither211 struct{}
+
+// Dither211 satisfies draw.Drawer
+var _ draw.Drawer = Dither211{}
+
+func (d Dither211) Draw(dst draw.Image, r image.Rectangle, src image.Image, sp image.Point) {
+	pd, ok := dst.(*image.Paletted)
+	if !ok {
+		// dither211 currently requires a palette
+		draw.Draw(dst, r, src, sp, draw.Src)
+		return
+	}
+	// intersect r with both dst and src bounds, fix up sp.
+	ir := r.Intersect(pd.Bounds()).
+		Intersect(src.Bounds().Add(r.Min.Sub(sp)))
+	if ir.Empty() {
+		return // no work to do.
+	}
+	sp = ir.Min.Sub(r.Min)
+	// get subimage of src
+	sr := ir.Add(sp)
+	if !sr.Eq(src.Bounds()) {
+		s, ok := src.(interface {
+			SubImage(image.Rectangle) image.Image
+		})
+		if !ok {
+			// dither211 currently works on whole images
+			draw.Draw(dst, r, src, sp, draw.Src)
+			return
+		}
+		src = s.SubImage(sr)
+	}
+	// dither211 currently returns a new image
+	src = dither211(src, LinearPalette{pd.Palette})
+	draw.Draw(dst, r, src, image.Point{}, draw.Src)
+}
+
+func dither211(i0 image.Image, p Palette) *image.Paletted {
 	cp := p.ColorPalette()
 	if len(cp) > 256 {
 		return nil
@@ -51,8 +89,9 @@ func Dither(i0 image.Image, p Palette) *image.Paletted {
 		return pi
 	}
 	// rt, dn hold diffused errors.
+	// todo: rewrite with signed errors. not sure this unsigned math is valid.
 	var rt color.RGBA64
-	dn := make([]color.RGBA64, b.Max.X - b.Min.X + 1)
+	dn := make([]color.RGBA64, b.Max.X-b.Min.X+1)
 	for y := b.Min.Y; y < b.Max.Y; y++ {
 		rt = dn[0]
 		dn[0] = color.RGBA64{}
@@ -85,22 +124,22 @@ func Dither(i0 image.Image, p Palette) *image.Paletted {
 			if uint16(pr) > rt.R {
 				rt.R = 0
 			} else {
-				rt.R = (rt.R-uint16(pr))/2
+				rt.R = (rt.R - uint16(pr)) / 2
 			}
 			if uint16(pg) > rt.G {
 				rt.G = 0
 			} else {
-				rt.G = (rt.G-uint16(pg))/2
+				rt.G = (rt.G - uint16(pg)) / 2
 			}
 			if uint16(pb) > rt.B {
 				rt.B = 0
 			} else {
-				rt.B = (rt.B-uint16(pb))/2
+				rt.B = (rt.B - uint16(pb)) / 2
 			}
 			// half goes down
-			dn[x+1].R = rt.R/2
-			dn[x+1].G = rt.G/2
-			dn[x+1].B = rt.B/2
+			dn[x+1].R = rt.R / 2
+			dn[x+1].G = rt.G / 2
+			dn[x+1].B = rt.B / 2
 			dn[x].R += dn[x+1].R
 			dn[x].G += dn[x+1].G
 			dn[x].B += dn[x+1].B
