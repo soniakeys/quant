@@ -89,60 +89,61 @@ func dither211(i0 image.Image, p Palette) *image.Paletted {
 		return pi
 	}
 	// rt, dn hold diffused errors.
-	// todo: rewrite with signed errors. not sure this unsigned math is valid.
-	var rt color.RGBA64
-	dn := make([]color.RGBA64, b.Max.X-b.Min.X+1)
+	type diffusedError struct{ r, g, b int }
+	var rt diffusedError
+	dn := make([]diffusedError, b.Max.X-b.Min.X+1)
 	for y := b.Min.Y; y < b.Max.Y; y++ {
 		rt = dn[0]
-		dn[0] = color.RGBA64{}
+		dn[0] = diffusedError{}
 		for x := b.Min.X; x < b.Max.X; x++ {
 			// full color from original image
-			c0 := i0.At(x, y)
-			r0, g0, b0, _ := c0.RGBA()
+			r0, g0, b0, _ := i0.At(x, y).RGBA()
 			// adjusted full color = original color + diffused error
-			r0 += uint32(rt.R)
-			g0 += uint32(rt.G)
-			b0 += uint32(rt.B)
-			if r0 > 0xffff {
-				r0 = 0xffff
+			rt.r += int(r0)
+			rt.g += int(g0)
+			rt.b += int(b0)
+			// within limits
+			if rt.r < 0 {
+				rt.r = 0
+			} else if rt.r > 0xffff {
+				rt.r = 0xffff
 			}
-			if g0 > 0xffff {
-				g0 = 0xffff
+			if rt.g < 0 {
+				rt.g = 0
+			} else if rt.g > 0xffff {
+				rt.g = 0xffff
 			}
-			if b0 > 0xffff {
-				b0 = 0xffff
+			if rt.b < 0 {
+				rt.b = 0
+			} else if rt.b > 0xffff {
+				rt.b = 0xffff
 			}
-			rt.R = uint16(r0)
-			rt.G = uint16(g0)
-			rt.B = uint16(b0)
+			afc := color.RGBA64{uint16(rt.r), uint16(rt.g), uint16(rt.b), 0}
 			// nearest palette entry
-			i := cp.Index(rt)
+			i := cp.Index(afc)
+			// set pixel in destination image
 			pi.SetColorIndex(x, y, uint8(i))
-			pr, pg, pb, _ := cp[i].RGBA()
 			// error to be diffused = full color - palette color.
+			e := rt
+			pr, pg, pb, _ := cp[i].RGBA()
+			e.r -= int(pr)
+			e.g -= int(pg)
+			e.b -= int(pb)
 			// half of error goes right
-			if uint16(pr) > rt.R {
-				rt.R = 0
-			} else {
-				rt.R = (rt.R - uint16(pr)) / 2
-			}
-			if uint16(pg) > rt.G {
-				rt.G = 0
-			} else {
-				rt.G = (rt.G - uint16(pg)) / 2
-			}
-			if uint16(pb) > rt.B {
-				rt.B = 0
-			} else {
-				rt.B = (rt.B - uint16(pb)) / 2
-			}
-			// half goes down
-			dn[x+1].R = rt.R / 2
-			dn[x+1].G = rt.G / 2
-			dn[x+1].B = rt.B / 2
-			dn[x].R += dn[x+1].R
-			dn[x].G += dn[x+1].G
-			dn[x].B += dn[x+1].B
+			rt.r = e.r / 2
+			rt.g = e.g / 2
+			rt.b = e.b / 2
+			// the other half goes down
+			e.r -= rt.r
+			e.g -= rt.g
+			e.b -= rt.b
+			dx := x - b.Min.X
+			dn[dx+1].r = e.r / 2
+			dn[dx+1].g = e.g / 2
+			dn[dx+1].b = e.b / 2
+			dn[dx].r += e.r - dn[dx+1].r
+			dn[dx].g += e.g - dn[dx+1].g
+			dn[dx].b += e.b - dn[dx+1].b
 		}
 	}
 	return pi
