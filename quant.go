@@ -11,10 +11,11 @@ import (
 
 // Quantizer defines a color quantizer for images.
 type Quantizer interface {
-	// Quantize int argument specifies the desired number of colors
-	// in the result image.
-	Image(image.Image, int) *image.Paletted
-	Palette(image.Image, int) Palette
+	// Image quantizes an image and returns a paletted image
+	Image(image.Image) *image.Paletted
+	// Palette quantizes an image and returns a Palette.  Note the type is
+	// the Palette of this package and not image.Palette.
+	Palette(image.Image) Palette
 }
 
 type Palette interface {
