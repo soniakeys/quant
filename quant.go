@@ -8,6 +8,7 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
+	"math"
 )
 
 // Quantizer defines a color quantizer for images.
@@ -73,62 +74,85 @@ func (d Dither211) Draw(dst draw.Image, r image.Rectangle, src image.Image, sp i
 		}
 		src = s.SubImage(sr)
 	}
-	// dither211 currently returns a new image
-	src = dither211(src, LinearPalette{pd.Palette})
+	// dither211 currently returns a new image, or nil if dithering not
+	// possible.
+	if s := dither211(src, pd.Palette); s != nil {
+		src = s
+	}
 	draw.Draw(dst, r, src, image.Point{}, draw.Src)
 }
 
-func dither211(i0 image.Image, p Palette) *image.Paletted {
-	cp := p.ColorPalette()
+// signed color type, no alpha.  signed to represent color deltas as well as
+// color values 0-ffff as with colorRGBA64
+type sRGB struct{ r, g, b int32 }
+
+// a linear palette, but with signed values.  while the fields hold uint32s,
+// values must be restricted to 0-ffff as with color.RGBA64.  values are signed
+// here to facilitate arithmetic, not to represent some new color space.
+type sPalette []sRGB
+
+// like PaletteIndex method
+func (p sPalette) index(c sRGB) int {
+	// still the awful linear search
+	i, min := 0, int64(math.MaxInt64)
+	for j, pc := range p {
+		d := int64(c.r - pc.r)
+		s := d * d
+		d = int64(c.g - pc.g)
+		s += d * d
+		d = int64(c.b - pc.b)
+		s += d * d
+		if s < min {
+			min = s
+			i = j
+		}
+	}
+	return i
+}
+
+// currently this is strictly a helper function for Dither211.Draw, so
+// not generalized to use Palette from this package.
+func dither211(i0 image.Image, cp color.Palette) *image.Paletted {
 	if len(cp) > 256 {
+		// representation limit of image.Paletted.  a little sketchy to return
+		// nil, but unworkable results are always better than wrong results.
 		return nil
 	}
 	b := i0.Bounds()
 	pi := image.NewPaletted(b, cp)
-	if b.Max.Y-b.Min.Y == 0 || b.Max.X-b.Min.X == 0 {
-		return pi
+	if b.Empty() {
+		return pi // no work to do
+	}
+	p64 := make([]color.RGBA64, len(cp))
+	sp := make(sPalette, len(cp))
+	for i, c := range cp {
+		r, g, b, _ := c.RGBA()
+		p64[i] = color.RGBA64{uint16(r), uint16(g), uint16(b), 0xffff}
+		sp[i] = sRGB{int32(r), int32(g), int32(b)}
 	}
 	// rt, dn hold diffused errors.
-	type diffusedError struct{ r, g, b int }
-	var rt diffusedError
-	dn := make([]diffusedError, b.Max.X-b.Min.X+1)
+	var rt sRGB
+	dn := make([]sRGB, b.Dx()+1)
 	for y := b.Min.Y; y < b.Max.Y; y++ {
-		rt = dn[0]
-		dn[0] = diffusedError{}
+		rt = dn[1]
+		dn[0] = sRGB{}
 		for x := b.Min.X; x < b.Max.X; x++ {
 			// full color from original image
 			r0, g0, b0, _ := i0.At(x, y).RGBA()
-			// adjusted full color = original color + diffused error
-			rt.r += int(r0)
-			rt.g += int(g0)
-			rt.b += int(b0)
-			// within limits
-			if rt.r < 0 {
-				rt.r = 0
-			} else if rt.r > 0xffff {
-				rt.r = 0xffff
-			}
-			if rt.g < 0 {
-				rt.g = 0
-			} else if rt.g > 0xffff {
-				rt.g = 0xffff
-			}
-			if rt.b < 0 {
-				rt.b = 0
-			} else if rt.b > 0xffff {
-				rt.b = 0xffff
-			}
-			afc := color.RGBA64{uint16(rt.r), uint16(rt.g), uint16(rt.b), 0}
+			// adjusted full color = diffused err + original color
+			rt.r += int32(r0)
+			rt.g += int32(g0)
+			rt.b += int32(b0)
 			// nearest palette entry
-			i := cp.Index(afc)
+			i := sp.index(rt)
 			// set pixel in destination image
 			pi.SetColorIndex(x, y, uint8(i))
 			// error to be diffused = full color - palette color.
 			e := rt
-			pr, pg, pb, _ := cp[i].RGBA()
-			e.r -= int(pr)
-			e.g -= int(pg)
-			e.b -= int(pb)
+			pc := sp[i]
+			e.r -= pc.r
+			e.g -= pc.g
+			e.b -= pc.b
 			// half of error goes right
 			rt.r = e.r / 2
 			rt.g = e.g / 2
