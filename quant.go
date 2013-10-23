@@ -42,12 +42,13 @@ func (p LinearPalette) ColorPalette() color.Palette {
 	return p.Palette
 }
 
-type Dither211 struct{}
+type Sierra24A struct{}
 
-// Dither211 satisfies draw.Drawer
-var _ draw.Drawer = Dither211{}
+// Sierra24A satisfies draw.Drawer
+var _ draw.Drawer = Sierra24A{}
 
-func (d Dither211) Draw(dst draw.Image, r image.Rectangle, src image.Image, sp image.Point) {
+// Dithering filter by Frankie Sierra.
+func (d Sierra24A) Draw(dst draw.Image, r image.Rectangle, src image.Image, sp image.Point) {
 	pd, ok := dst.(*image.Paletted)
 	if !ok {
 		// dither211 currently requires a palette
@@ -79,28 +80,25 @@ func (d Dither211) Draw(dst draw.Image, r image.Rectangle, src image.Image, sp i
 	if s := dither211(src, pd.Palette); s != nil {
 		src = s
 	}
+	// this avoids any problem of src dst overlap but it would usually
+	// work to render directly into dst.  todo.
 	draw.Draw(dst, r, src, image.Point{}, draw.Src)
 }
 
 // signed color type, no alpha.  signed to represent color deltas as well as
 // color values 0-ffff as with colorRGBA64
 type sRGB struct{ r, g, b int32 }
-
-// a linear palette, but with signed values.  while the fields hold uint32s,
-// values must be restricted to 0-ffff as with color.RGBA64.  values are signed
-// here to facilitate arithmetic, not to represent some new color space.
 type sPalette []sRGB
 
-// like PaletteIndex method
 func (p sPalette) index(c sRGB) int {
 	// still the awful linear search
 	i, min := 0, int64(math.MaxInt64)
 	for j, pc := range p {
-		d := int64(c.r - pc.r)
+		d := int64(c.r) - int64(pc.r)
 		s := d * d
-		d = int64(c.g - pc.g)
+		d = int64(c.g) - int64(pc.g)
 		s += d * d
-		d = int64(c.b - pc.b)
+		d = int64(c.b) - int64(pc.b)
 		s += d * d
 		if s < min {
 			min = s
@@ -123,51 +121,63 @@ func dither211(i0 image.Image, cp color.Palette) *image.Paletted {
 	if b.Empty() {
 		return pi // no work to do
 	}
-	p64 := make([]color.RGBA64, len(cp))
 	sp := make(sPalette, len(cp))
 	for i, c := range cp {
 		r, g, b, _ := c.RGBA()
-		p64[i] = color.RGBA64{uint16(r), uint16(g), uint16(b), 0xffff}
 		sp[i] = sRGB{int32(r), int32(g), int32(b)}
 	}
-	// rt, dn hold diffused errors.
-	var rt sRGB
+	// afc is adjustd full color.  e, rt, dn hold diffused errors.
+	var afc, e, rt sRGB
 	dn := make([]sRGB, b.Dx()+1)
 	for y := b.Min.Y; y < b.Max.Y; y++ {
-		rt = dn[1]
+		rt = dn[0]
 		dn[0] = sRGB{}
 		for x := b.Min.X; x < b.Max.X; x++ {
 			// full color from original image
 			r0, g0, b0, _ := i0.At(x, y).RGBA()
-			// adjusted full color = diffused err + original color
-			rt.r += int32(r0)
-			rt.g += int32(g0)
-			rt.b += int32(b0)
+			// adjusted full color = original color + diffused error
+			afc.r = int32(r0) + rt.r>>2
+			afc.g = int32(g0) + rt.g>>2
+			afc.b = int32(b0) + rt.b>>2
+			// clipping or clamping is usually explained as necessary
+			// to avoid integer overflow but with palettes that do not
+			// represent the full color space of the image, it is needed
+			// to keep areas of excess color from saturating at palette
+			// limits and bleeding into neighboring areas.
+			if afc.r < 0 {
+				afc.r = 0
+			} else if afc.r > 0xffff {
+				afc.r = 0xffff
+			}
+			if afc.g < 0 {
+				afc.g = 0
+			} else if afc.g > 0xffff {
+				afc.g = 0xffff
+			}
+			if afc.b < 0 {
+				afc.b = 0
+			} else if afc.b > 0xffff {
+				afc.b = 0xffff
+			}
 			// nearest palette entry
-			i := sp.index(rt)
+			i := sp.index(afc)
 			// set pixel in destination image
 			pi.SetColorIndex(x, y, uint8(i))
 			// error to be diffused = full color - palette color.
-			e := rt
 			pc := sp[i]
-			e.r -= pc.r
-			e.g -= pc.g
-			e.b -= pc.b
-			// half of error goes right
-			rt.r = e.r / 2
-			rt.g = e.g / 2
-			rt.b = e.b / 2
+			e.r = afc.r - pc.r
+			e.g = afc.g - pc.g
+			e.b = afc.b - pc.b
+			// half of error*4 goes right
+			dx := x - b.Min.X + 1
+			rt.r = dn[dx].r + e.r*2
+			rt.g = dn[dx].g + e.g*2
+			rt.b = dn[dx].b + e.b*2
 			// the other half goes down
-			e.r -= rt.r
-			e.g -= rt.g
-			e.b -= rt.b
-			dx := x - b.Min.X
-			dn[dx+1].r = e.r / 2
-			dn[dx+1].g = e.g / 2
-			dn[dx+1].b = e.b / 2
-			dn[dx].r += e.r - dn[dx+1].r
-			dn[dx].g += e.g - dn[dx+1].g
-			dn[dx].b += e.b - dn[dx+1].b
+			dn[dx] = e
+			dn[dx-1].r += e.r
+			dn[dx-1].g += e.g
+			dn[dx-1].b += e.b
 		}
 	}
 	return pi
