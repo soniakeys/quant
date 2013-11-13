@@ -63,17 +63,19 @@ type quantizer struct {
 type point struct{ x, y int32 }
 
 type cluster struct {
-	px       []point // list of points in the cluster
-	widestCh int     // w const identifying channel with widest value range
-	min, max uint32  // min, max color values of widest channel
-	volume   uint64  // color volume
-	priority int     // early: population, late: population*volume
+	px []point // list of points in the cluster
+	// rgb const identifying dimension in color space with widest range
+	widestDim int
+	min, max  uint32 // min, max color values in dimension with widest range
+	volume    uint64 // color volume
+	priority  int    // early: population, late: population*volume
 }
 
-const ( // w const
-	wr = iota
-	wg
-	wb
+// indentifiers for RGB channels, or dimensions or axes of RGB color space
+const (
+	rgbR = iota
+	rgbG
+	rgbB
 )
 
 func newQuantizer(img image.Image, n int) *quantizer {
@@ -98,10 +100,10 @@ func newQuantizer(img image.Image, n int) *quantizer {
 }
 
 // Cluster by repeatedly splitting clusters in two stages.  For the first
-// stage, prioritize by population and split tails off distribution of
-// color channel with widest range.  For the second stage, prioritize by
-// the product of population and color volume, and split at the mean of
-// the color channel with widest range.  Terminate when the desired number
+// stage, prioritize by population and split tails off distribution in color
+// dimension with widest range.  For the second stage, prioritize by the
+// product of population and color volume, and split at the mean of the color
+// values in the dimension with widest range.  Terminate when the desired number
 // of clusters has been populated or when clusters cannot be further split.
 func (qz *quantizer) cluster() {
 	cs := qz.cs
@@ -152,7 +154,7 @@ func (qz *quantizer) cluster() {
 }
 
 func (q *quantizer) setPriority(c *cluster, early bool) {
-	// Find extents of color values in each channel.
+	// Find extents of color values in each dimension.
 	var maxR, maxG, maxB uint32
 	minR := uint32(math.MaxUint32)
 	minG := uint32(math.MaxUint32)
@@ -178,22 +180,22 @@ func (q *quantizer) setPriority(c *cluster, early bool) {
 			maxB = b
 		}
 	}
-	// See which channel had the widest range.
-	w := wg
+	// See which color dimension had the widest range.
+	w := rgbG
 	min := minG
 	max := maxG
 	if maxR-minR > max-min {
-		w = wr
+		w = rgbR
 		min = minR
 		max = maxR
 	}
 	if maxB-minB > max-min {
-		w = wb
+		w = rgbB
 		min = minB
 		max = maxB
 	}
 	// store statistics
-	c.widestCh = w
+	c.widestDim = w
 	c.min = min
 	c.max = max
 	c.volume = uint64(maxR-minR) * uint64(maxG-minG) * uint64(maxB-minB)
@@ -205,18 +207,18 @@ func (q *quantizer) setPriority(c *cluster, early bool) {
 
 func (q *quantizer) cutValue(c *cluster, early bool) uint32 {
 	var sum uint64
-	switch c.widestCh {
-	case wr:
+	switch c.widestDim {
+	case rgbR:
 		for _, p := range c.px {
 			r, _, _, _ := q.img.At(int(p.x), int(p.y)).RGBA()
 			sum += uint64(r)
 		}
-	case wg:
+	case rgbG:
 		for _, p := range c.px {
 			_, g, _, _ := q.img.At(int(p.x), int(p.y)).RGBA()
 			sum += uint64(g)
 		}
-	case wb:
+	case rgbB:
 		for _, p := range c.px {
 			_, _, b, _ := q.img.At(int(p.x), int(p.y)).RGBA()
 			sum += uint64(b)
@@ -240,14 +242,14 @@ func (q *quantizer) split(s, c *cluster, m uint32) {
 	i := 0
 	last := len(px) - 1
 	for i <= last {
-		// Get pixel value of appropriate channel.
+		// Get color value in appropriate dimension.
 		r, g, b, _ := q.img.At(int(px[i].x), int(px[i].y)).RGBA()
-		switch s.widestCh {
-		case wr:
+		switch s.widestDim {
+		case rgbR:
 			v = r
-		case wg:
+		case rgbG:
 			v = g
-		case wb:
+		case rgbB:
 			v = b
 		}
 		// Split into two non-empty parts at m.

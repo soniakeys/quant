@@ -12,7 +12,7 @@ import (
 	"math"
 	"sort"
 
-    "github.com/soniakeys/quant"
+	"github.com/soniakeys/quant"
 )
 
 // Quantizer implements median cut color quantization.
@@ -44,18 +44,18 @@ func (q Quantizer) Image(img image.Image) *image.Paletted {
 // Palette quantizes an image and returns a Palette.  Note the type is
 // the Palette of this package and not image.Palette.
 func (n Quantizer) Palette(img image.Image) quant.Palette {
-    qz := newQuantizer(img, int(n))
-    if n > 1 {
-        qz.cluster() // cluster pixels by color
-    }
-    return qz.palette()
+	qz := newQuantizer(img, int(n))
+	if n > 1 {
+		qz.cluster() // cluster pixels by color
+	}
+	return qz.palette()
 }
 
 func (n Quantizer) Quantize(p color.Palette, m image.Image) color.Palette {
-    qz := newQuantizer(m, int(n))
-    if n > 1 {
-        qz.cluster() // cluster pixels by color
-    }
+	qz := newQuantizer(m, int(n))
+	if n > 1 {
+		qz.cluster() // cluster pixels by color
+	}
 	return p[:len(p)+copy(p[len(p):cap(p)], qz.palette().ColorPalette())]
 }
 
@@ -71,13 +71,14 @@ type queue []*cluster
 
 type cluster struct {
 	px       []point // list of points in the cluster
-	widestCh int     // w const identifying channel with widest value range
+	widestCh int     // rgb const identifying axis with widest value range
 }
 
-const ( // w const
-	wr = iota
-	wg
-	wb
+// indentifiers for RGB channels, or dimensions or axes of RGB color space
+const (
+	rgbR = iota
+	rgbG
+	rgbB
 )
 
 func newQuantizer(img image.Image, nq int) *quantizer {
@@ -143,7 +144,7 @@ func (qz *quantizer) cluster() {
 }
 
 func (q *quantizer) setWidestChannel(c *cluster) bool {
-	// Find extents of color values in each channel.
+	// Find extents of color values in each dimension.
 	var maxR, maxG, maxB uint32
 	minR := uint32(math.MaxUint32)
 	minG := uint32(math.MaxUint32)
@@ -169,42 +170,43 @@ func (q *quantizer) setWidestChannel(c *cluster) bool {
 			maxB = b
 		}
 	}
-	// See which channel had the widest range.
-	c.widestCh = wg
+	// See which color dimension had the widest range.
+	c.widestCh = rgbG
 	min := minG
 	max := maxG
 	if maxR-minR > max-min {
-		c.widestCh = wr
+		c.widestCh = rgbR
 		min = minR
 		max = maxR
 	}
 	if maxB-minB > max-min {
-		c.widestCh = wb
+		c.widestCh = rgbB
 		min = minB
 		max = maxB
 	}
 	return max > min
 }
 
-// Arg c must have value range > 0 in channel c.widestCh.
+// Arg c must have value range > 0 in dimension c.widestDim.
 // return value m is guararanteed to split cluster into two non-empty clusters
-// by v < m where v is pixel value of channel c.Widest.
+// by v < m where v is pixel value of dimension c.Widest.
 func (q *quantizer) medianCut(c *cluster) uint32 {
 	px := c.px
 	ch := q.ch[:len(px)]
-	// Copy values from appropriate channel to buffer for computing median.
+	// Copy values from appropriate color channel to buffer for
+	// computing median.
 	switch c.widestCh {
-	case wr:
+	case rgbR:
 		for i, p := range c.px {
 			r, _, _, _ := q.img.At(int(p.x), int(p.y)).RGBA()
 			ch[i] = uint16(r)
 		}
-	case wg:
+	case rgbG:
 		for i, p := range c.px {
 			_, g, _, _ := q.img.At(int(p.x), int(p.y)).RGBA()
 			ch[i] = uint16(g)
 		}
-	case wb:
+	case rgbB:
 		for i, p := range c.px {
 			_, _, b, _ := q.img.At(int(p.x), int(p.y)).RGBA()
 			ch[i] = uint16(b)
@@ -236,14 +238,14 @@ func (q *quantizer) split(s, c *cluster, m uint32) {
 	i := 0
 	last := len(px) - 1
 	for i <= last {
-		// Get pixel value of appropriate channel.
+		// Get color value in appropriate dimension.
 		r, g, b, _ := q.img.At(int(px[i].x), int(px[i].y)).RGBA()
 		switch s.widestCh {
-		case wr:
+		case rgbR:
 			v = r
-		case wg:
+		case rgbG:
 			v = g
-		case wb:
+		case rgbB:
 			v = b
 		}
 		// Split at m.
@@ -288,26 +290,26 @@ func (qz *quantizer) paletted() *image.Paletted {
 }
 
 func (qz *quantizer) palette() quant.Palette {
-    cp := make(color.Palette, len(qz.cs))
-    for i := range qz.cs {
-        px := qz.cs[i].px
-        // Average values in cluster to get palette color.
-        var rsum, gsum, bsum int64
-        for _, p := range px {
-            r, g, b, _ := qz.img.At(int(p.x), int(p.y)).RGBA()
-            rsum += int64(r)
-            gsum += int64(g)
-            bsum += int64(b)
-        }
-        n64 := int64(len(px) << 8)
-        cp[i] = color.RGBA{
-            uint8(rsum / n64),
-            uint8(gsum / n64),
-            uint8(bsum / n64),
-            0xff,
-        }
-    }
-    return quant.LinearPalette{cp}
+	cp := make(color.Palette, len(qz.cs))
+	for i := range qz.cs {
+		px := qz.cs[i].px
+		// Average values in cluster to get palette color.
+		var rsum, gsum, bsum int64
+		for _, p := range px {
+			r, g, b, _ := qz.img.At(int(p.x), int(p.y)).RGBA()
+			rsum += int64(r)
+			gsum += int64(g)
+			bsum += int64(b)
+		}
+		n64 := int64(len(px) << 8)
+		cp[i] = color.RGBA{
+			uint8(rsum / n64),
+			uint8(gsum / n64),
+			uint8(bsum / n64),
+			0xff,
+		}
+	}
+	return quant.LinearPalette{cp}
 }
 
 // Implement sort.Interface for sort in median algorithm.
