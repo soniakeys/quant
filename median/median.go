@@ -71,9 +71,10 @@ func (Quantizer) Quantize(p color.Palette, m image.Image) color.Palette {
 }
 
 type quantizer struct {
-	img image.Image // original image
-	cs  []cluster   // len(cs) is the desired number of colors
-	ch  chValues    // buffer for computing median
+	img image.Image        // original image
+	cs  []cluster          // len(cs) is the desired number of colors
+	ch  chValues           // buffer for computing median
+	t   *quant.TreePalette // root
 }
 
 type point struct{ x, y int32 }
@@ -83,6 +84,16 @@ type queue []*cluster
 type cluster struct {
 	px       []point // list of points in the cluster
 	widestCh int     // rgb const identifying axis with widest value range
+	// limits of this cluster
+	minR, maxR uint32
+	minG, maxG uint32
+	minB, maxB uint32
+	// true if corresponding value above represents a bound or hull of the
+	// represented color space
+	bMinR, bMaxR bool
+	bMinG, bMaxG bool
+	bMinB, bMaxB bool
+	t            *quant.TreePalette // leaf node representing this cluster
 }
 
 // indentifiers for RGB channels, or dimensions or axes of RGB color space
@@ -102,16 +113,46 @@ func newQuantizer(img image.Image, nq int) *quantizer {
 		img: img,
 		ch:  make(chValues, npx),
 		cs:  make([]cluster, nq),
+		t:   &quant.TreePalette{},
 	}
 	// Populate initial cluster with all pixels from image.
 	c := &qz.cs[0]
 	px := make([]point, npx)
 	c.px = px
+	c.t = qz.t
+	c.minR = math.MaxUint32
+	c.minG = math.MaxUint32
+	c.minB = math.MaxUint32
+	c.bMinR = true
+	c.bMinG = true
+	c.bMinB = true
+	c.bMaxR = true
+	c.bMaxG = true
+	c.bMaxB = true
 	i := 0
 	for y := b.Min.Y; y < b.Max.Y; y++ {
 		for x := b.Min.X; x < b.Max.X; x++ {
 			px[i].x = int32(x)
 			px[i].y = int32(y)
+			r, g, b, _ := img.At(x, y).RGBA()
+			if r < c.minR {
+				c.minR = r
+			}
+			if r > c.maxR {
+				c.maxR = r
+			}
+			if g < c.minG {
+				c.minG = g
+			}
+			if g > c.maxG {
+				c.maxG = g
+			}
+			if b < c.minB {
+				c.minB = b
+			}
+			if b > c.maxB {
+				c.maxB = b
+			}
 			i++
 		}
 	}
@@ -156,6 +197,8 @@ func (qz *quantizer) cluster() {
 
 func (q *quantizer) setWidestChannel(c *cluster) bool {
 	// Find extents of color values in each dimension.
+	// (limits in cluster are not good enough here, we want extents as
+	// represented by pixels.)
 	var maxR, maxG, maxB uint32
 	minR := uint32(math.MaxUint32)
 	minG := uint32(math.MaxUint32)
@@ -243,7 +286,9 @@ func (q *quantizer) medianCut(c *cluster) uint32 {
 	return uint32(ch[m2])
 }
 
+// split s into c and s at value m
 func (q *quantizer) split(s, c *cluster, m uint32) {
+	*c = *s // copy extent data
 	px := s.px
 	var v uint32
 	i := 0
@@ -267,9 +312,36 @@ func (q *quantizer) split(s, c *cluster, m uint32) {
 			last--
 		}
 	}
-	// Split the pixel list.
+	// Split the pixel list.  s keeps smaller values, c gets larger values.
 	s.px = px[:i]
 	c.px = px[i:]
+	// Split color extent
+	t := s.t
+	switch s.widestCh {
+	case rgbR:
+		s.maxR = m
+		c.minR = m
+		s.bMaxR = false
+		c.bMinR = false
+		t.Type = quant.TSplitR
+	case rgbG:
+		s.maxG = m
+		c.minG = m
+		s.bMaxG = false
+		c.bMinG = false
+		t.Type = quant.TSplitG
+	case rgbB:
+		s.maxB = m
+		c.minB = m
+		s.bMaxB = false
+		c.bMinB = false
+		t.Type = quant.TSplitB
+	}
+	// Split node
+	t.Split = m
+	t.Low = &quant.TreePalette{}
+	t.High = &quant.TreePalette{}
+	s.t, c.t = t.Low, t.High
 }
 
 func (qz *quantizer) paletted() *image.Paletted {
@@ -301,7 +373,6 @@ func (qz *quantizer) paletted() *image.Paletted {
 }
 
 func (qz *quantizer) palette() quant.Palette {
-	cp := make(color.Palette, len(qz.cs))
 	for i := range qz.cs {
 		px := qz.cs[i].px
 		// Average values in cluster to get palette color.
@@ -312,15 +383,15 @@ func (qz *quantizer) palette() quant.Palette {
 			gsum += int64(g)
 			bsum += int64(b)
 		}
-		n64 := int64(len(px) << 8)
-		cp[i] = color.RGBA{
-			uint8(rsum / n64),
-			uint8(gsum / n64),
-			uint8(bsum / n64),
-			0xff,
+		n64 := int64(len(px))
+		qz.cs[i].t.Color = color.RGBA64{
+			uint16(rsum / n64),
+			uint16(gsum / n64),
+			uint16(bsum / n64),
+			0xffff,
 		}
 	}
-	return quant.LinearPalette{cp}
+	return qz.t
 }
 
 // Implement sort.Interface for sort in median algorithm.

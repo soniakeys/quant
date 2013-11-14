@@ -20,31 +20,6 @@ type Quantizer interface {
 	Palette(image.Image) Palette
 }
 
-// Palette is a palette of color.Colors, just as color.Pallete of the standard
-// library.
-//
-// It is defined as an interface here to allow more general implementations
-// of Index, presumably ones that maintain some data structure to achieve
-// performance advantages over linear search.
-type Palette interface {
-	Convert(color.Color) color.Color
-	Index(color.Color) int
-	ColorPalette() color.Palette
-}
-
-// LinearPalette implements the Palette interface with color.Palette
-// and has no optimizations.
-type LinearPalette struct {
-	color.Palette
-}
-
-// ColorPalette satisfies interface Palette.
-//
-// It simply returns the internal color.Palette.
-func (p LinearPalette) ColorPalette() color.Palette {
-	return p.Palette
-}
-
 // Sierra24A satisfies draw.Drawer
 type Sierra24A struct{}
 
