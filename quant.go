@@ -38,16 +38,25 @@ type LinearPalette struct {
 	color.Palette
 }
 
+// ColorPalette satisfies interface Palette.
+//
+// It simply returns the internal color.Palette.
 func (p LinearPalette) ColorPalette() color.Palette {
 	return p.Palette
 }
 
+// Sierra24A satisfies draw.Drawer
 type Sierra24A struct{}
 
-// Sierra24A satisfies draw.Drawer
 var _ draw.Drawer = Sierra24A{}
 
-// Dithering filter by Frankie Sierra.
+// Draw performs error diffusion dithering.
+//
+// This method satisfies the draw.Drawer interface, implementing a dithering
+// filter attributed to Frankie Sierra.  It uses the kernel
+//
+//	  X 2
+//	1 1
 func (d Sierra24A) Draw(dst draw.Image, r image.Rectangle, src image.Image, sp image.Point) {
 	pd, ok := dst.(*image.Paletted)
 	if !ok {

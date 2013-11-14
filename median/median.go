@@ -15,20 +15,22 @@ import (
 	"github.com/soniakeys/quant"
 )
 
-// Quantizer implements median cut color quantization.
+// Quantizer methods implement median cut color quantization.
 //
 // The value is the target number of colors.
 // Methods do not require pointer receivers, simply construct Quantizer
 // objects with a type conversion.
+//
+// The type satisfies both quant.Quantizer and draw.Quantizer interfaces.
 type Quantizer int
 
 var _ quant.Quantizer = Quantizer(0)
 var _ draw.Quantizer = Quantizer(0)
 
-// Image quantizes an image and returns a paletted image.
+// Image performs color quantization and returns a paletted image.
 //
-// The target number of colors is limited here to 256, the limit of
-// image.Paletted.
+// Returned is a paletted image with no more than q colors. Note though
+// that image.Paletted is limited to 256 colors.
 func (q Quantizer) Image(img image.Image) *image.Paletted {
 	n := int(q)
 	if n > 256 {
@@ -41,16 +43,22 @@ func (q Quantizer) Image(img image.Image) *image.Paletted {
 	return qz.paletted() // generate paletted image from clusters
 }
 
-// Palette quantizes an image and returns a Palette.  Note the type is
-// the Palette of this package and not image.Palette.
-func (n Quantizer) Palette(img image.Image) quant.Palette {
-	qz := newQuantizer(img, int(n))
-	if n > 1 {
+// Palette performs color quantization and returns a quant.Palette object.
+//
+// Returned is a palette with no more than q colors. Q may be > 256.
+func (q Quantizer) Palette(img image.Image) quant.Palette {
+	qz := newQuantizer(img, int(q))
+	if q > 1 {
 		qz.cluster() // cluster pixels by color
 	}
 	return qz.palette()
 }
 
+// Quantize performs color quantization and returns a color.Palette.
+//
+// Following the behavior documented with the draw.Quantizer interface,
+// "Quantize appends up to cap(p) - len(p) colors to p and returns the
+// updated palette..."
 func (n Quantizer) Quantize(p color.Palette, m image.Image) color.Palette {
 	qz := newQuantizer(m, int(n))
 	if n > 1 {

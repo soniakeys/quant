@@ -1,7 +1,21 @@
 // Copyright 2013 Sonia Keys.
 // Licensed under MIT license.  See "license" file in this source tree.
 
-// Mean is a simple color quantizer.
+// Mean is a simple color quantizer.  The algorithm successively divides the
+// color space much like a median cut algorithm, but a mean statistic is used
+// rather than a median.  In another simplification, there is no priority
+// queue to order color blocks; linear search is used instead.
+//
+// An added sopphistication though, is that division proceeds in two stages,
+// with somewhat different criteria used for the earlier cuts than for the
+// later cuts.
+//
+// Motivation for using the mean is the observation that in a two stage
+// algorithm, cuts are offset from the computed average so having the logically
+// "correct" value of the median must not be that important.  Motivation
+// for the linear search is that the number of blocks to search is limited
+// to the target number of colors in the palette, which is small and typically
+// limited to 256.  If n is 256, O(log n) and O(n) both become O(1).
 package mean
 
 import (
@@ -13,11 +27,13 @@ import (
 	"github.com/soniakeys/quant"
 )
 
-// Quantizer implements median cut color quantization.
+// Quantizer methods implement mean cut color quantization.
 //
 // The value is the target number of colors.
 // Methods do not require pointer receivers, simply construct Quantizer
 // objects with a type conversion.
+//
+// The type satisfies both quant.Quantizer and draw.Quantizer interfaces.
 type Quantizer int
 
 var _ quant.Quantizer = Quantizer(0)
@@ -25,8 +41,8 @@ var _ draw.Quantizer = Quantizer(0)
 
 // Image performs color quantization and returns a paletted image.
 //
-// Argument n is the desired number of colors.  Returned is a paletted
-// image with no more than n colors.
+// Returned is a paletted image with no more than q colors.  Note though
+// that image.Paletted is limited to 256 colors.
 func (q Quantizer) Image(img image.Image) *image.Paletted {
 	n := int(q)
 	if n > 256 {
@@ -39,17 +55,25 @@ func (q Quantizer) Image(img image.Image) *image.Paletted {
 	return qz.paletted() // generate paletted image from clusters
 }
 
-func (n Quantizer) Palette(img image.Image) quant.Palette {
-	qz := newQuantizer(img, int(n))
-	if n > 1 {
+// Palette performs color quantization and returns a quant.Palette object.
+//
+// Returned is a palette with no more than q colors.  Q may be > 256.
+func (q Quantizer) Palette(img image.Image) quant.Palette {
+	qz := newQuantizer(img, int(q))
+	if q > 1 {
 		qz.cluster() // cluster pixels by color
 	}
 	return qz.palette()
 }
 
-func (n Quantizer) Quantize(p color.Palette, m image.Image) color.Palette {
-	qz := newQuantizer(m, int(n))
-	if n > 1 {
+// Quantize performs color quantization and returns a color.Palette.
+//
+// Following the behavior documented with the draw.Quantizer interface,
+// "Quantize appends up to cap(p) - len(p) colors to p and returns the
+// updated palette..."
+func (q Quantizer) Quantize(p color.Palette, m image.Image) color.Palette {
+	qz := newQuantizer(m, int(q))
+	if q > 1 {
 		qz.cluster() // cluster pixels by color
 	}
 	return p[:len(p)+copy(p[len(p):cap(p)], qz.palette().ColorPalette())]
