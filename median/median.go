@@ -58,9 +58,12 @@ func (q Quantizer) Palette(img image.Image) quant.Palette {
 //
 // Following the behavior documented with the draw.Quantizer interface,
 // "Quantize appends up to cap(p) - len(p) colors to p and returns the
-// updated palette..."
-func (n Quantizer) Quantize(p color.Palette, m image.Image) color.Palette {
-	qz := newQuantizer(m, int(n))
+// updated palette...."  This method does not limit the number of colors
+// to 256.  Cap(p) or the quantity cap(p) - len(p) may be > 256.
+// Also for this method the value of the Quantizer object is ignored.
+func (Quantizer) Quantize(p color.Palette, m image.Image) color.Palette {
+	n := cap(p) - len(p)
+	qz := newQuantizer(m, n)
 	if n > 1 {
 		qz.cluster() // cluster pixels by color
 	}
