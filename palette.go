@@ -4,16 +4,14 @@
 // Quant provides an interface for image color quantizers.
 package quant
 
-import (
-	"image/color"
-)
+import "image/color"
 
-// Palette is a palette of color.Colors, just as color.Pallete of the standard
-// library.
+// Palette is a palette of color.Colors, much like color.Pallete of the
+// standard library.
 //
-// It is defined as an interface here to allow more general implementations
-// of Index, presumably ones that maintain some data structure to achieve
-// performance advantages over linear search.
+// It is defined as an interface here to allow more general implementations,
+// presumably ones that maintain some data structure to achieve performance
+// advantages over linear search.
 type Palette interface {
 	Convert(color.Color) color.Color
 	ColorPalette() color.Palette
