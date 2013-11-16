@@ -51,7 +51,7 @@ func (q Quantizer) Palette(img image.Image) quant.Palette {
 	if q > 1 {
 		qz.cluster() // cluster pixels by color
 	}
-	return qz.palette()
+	return qz.t
 }
 
 // Quantize performs color quantization and returns a color.Palette.
@@ -67,14 +67,14 @@ func (Quantizer) Quantize(p color.Palette, m image.Image) color.Palette {
 	if n > 1 {
 		qz.cluster() // cluster pixels by color
 	}
-	return p[:len(p)+copy(p[len(p):cap(p)], qz.palette().ColorPalette())]
+	return p[:len(p)+copy(p[len(p):cap(p)], qz.t.ColorPalette())]
 }
 
 type quantizer struct {
-	img image.Image        // original image
-	cs  []cluster          // len(cs) is the desired number of colors
-	ch  chValues           // buffer for computing median
-	t   *quant.TreePalette // root
+	img image.Image       // original image
+	cs  []cluster         // len(cs) is the desired number of colors
+	ch  chValues          // buffer for computing median
+	t   quant.TreePalette // root
 }
 
 type point struct{ x, y int32 }
@@ -93,7 +93,7 @@ type cluster struct {
 	bMinR, bMaxR bool
 	bMinG, bMaxG bool
 	bMinB, bMaxB bool
-	t            *quant.TreePalette // leaf node representing this cluster
+	node         *quant.Node // palette node representing this cluster
 }
 
 // indentifiers for RGB channels, or dimensions or axes of RGB color space
@@ -113,13 +113,13 @@ func newQuantizer(img image.Image, nq int) *quantizer {
 		img: img,
 		ch:  make(chValues, npx),
 		cs:  make([]cluster, nq),
-		t:   &quant.TreePalette{},
 	}
 	// Populate initial cluster with all pixels from image.
 	c := &qz.cs[0]
 	px := make([]point, npx)
 	c.px = px
-	c.t = qz.t
+	c.node = &quant.Node{}
+	qz.t.Root = c.node
 	c.minR = math.MaxUint32
 	c.minG = math.MaxUint32
 	c.minB = math.MaxUint32
@@ -169,7 +169,8 @@ func (qz *quantizer) cluster() {
 	// Initial cluster.  populated at this point, but not analyzed.
 	c := &qz.cs[0]
 	var m uint32
-	for i := 1; ; {
+	i := 1
+	for {
 		// Only enqueue clusters that can be split.
 		if qz.setWidestChannel(c) {
 			heap.Push(pq, c)
@@ -191,6 +192,28 @@ func (qz *quantizer) cluster() {
 		}
 		if qz.setWidestChannel(s) {
 			heap.Push(pq, s) // return s to queue
+		}
+	}
+	// set TreePalette total and indexes
+	qz.t.Leaves = i
+	qz.t.Walk(func(leaf *quant.Node, i int) { leaf.Index = i })
+	// compute palette colors
+	for i := range qz.cs {
+		px := qz.cs[i].px
+		// Average values in cluster to get palette color.
+		var rsum, gsum, bsum int64
+		for _, p := range px {
+			r, g, b, _ := qz.img.At(int(p.x), int(p.y)).RGBA()
+			rsum += int64(r)
+			gsum += int64(g)
+			bsum += int64(b)
+		}
+		n64 := int64(len(px))
+		qz.cs[i].node.Color = color.RGBA64{
+			uint16(rsum / n64),
+			uint16(gsum / n64),
+			uint16(bsum / n64),
+			0xffff,
 		}
 	}
 }
@@ -316,82 +339,44 @@ func (q *quantizer) split(s, c *cluster, m uint32) {
 	s.px = px[:i]
 	c.px = px[i:]
 	// Split color extent
-	t := s.t
+	n := s.node
 	switch s.widestCh {
 	case rgbR:
 		s.maxR = m
 		c.minR = m
 		s.bMaxR = false
 		c.bMinR = false
-		t.Type = quant.TSplitR
+		n.Type = quant.TSplitR
 	case rgbG:
 		s.maxG = m
 		c.minG = m
 		s.bMaxG = false
 		c.bMinG = false
-		t.Type = quant.TSplitG
+		n.Type = quant.TSplitG
 	case rgbB:
 		s.maxB = m
 		c.minB = m
 		s.bMaxB = false
 		c.bMinB = false
-		t.Type = quant.TSplitB
+		n.Type = quant.TSplitB
 	}
 	// Split node
-	t.Split = m
-	t.Low = &quant.TreePalette{}
-	t.High = &quant.TreePalette{}
-	s.t, c.t = t.Low, t.High
+	n.Split = m
+	n.Low = &quant.Node{}
+	n.High = &quant.Node{}
+	s.node, c.node = n.Low, n.High
 }
 
 func (qz *quantizer) paletted() *image.Paletted {
-	cp := make(color.Palette, len(qz.cs))
+	cp := qz.t.ColorPalette()
 	pi := image.NewPaletted(qz.img.Bounds(), cp)
 	for i := range qz.cs {
-		px := qz.cs[i].px
-		// Average values in cluster to get palette color.
-		var rsum, gsum, bsum int64
-		for _, p := range px {
-			r, g, b, _ := qz.img.At(int(p.x), int(p.y)).RGBA()
-			rsum += int64(r)
-			gsum += int64(g)
-			bsum += int64(b)
-		}
-		n64 := int64(len(px) << 8)
-		cp[i] = color.RGBA{
-			uint8(rsum / n64),
-			uint8(gsum / n64),
-			uint8(bsum / n64),
-			0xff,
-		}
-		// Set image pixels.
-		for _, p := range px {
-			pi.SetColorIndex(int(p.x), int(p.y), uint8(i))
+		x := uint8(qz.cs[i].node.Index)
+		for _, p := range qz.cs[i].px {
+			pi.SetColorIndex(int(p.x), int(p.y), x)
 		}
 	}
 	return pi
-}
-
-func (qz *quantizer) palette() quant.Palette {
-	for i := range qz.cs {
-		px := qz.cs[i].px
-		// Average values in cluster to get palette color.
-		var rsum, gsum, bsum int64
-		for _, p := range px {
-			r, g, b, _ := qz.img.At(int(p.x), int(p.y)).RGBA()
-			rsum += int64(r)
-			gsum += int64(g)
-			bsum += int64(b)
-		}
-		n64 := int64(len(px))
-		qz.cs[i].t.Color = color.RGBA64{
-			uint16(rsum / n64),
-			uint16(gsum / n64),
-			uint16(bsum / n64),
-			0xffff,
-		}
-	}
-	return qz.t
 }
 
 // Implement sort.Interface for sort in median algorithm.

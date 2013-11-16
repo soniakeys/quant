@@ -1,7 +1,6 @@
 // Copyright 2013 Sonia Keys.
 // Licensed under MIT license.  See "license" file in this source tree.
 
-// Quant provides an interface for image color quantizers.
 package quant
 
 import (
