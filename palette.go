@@ -13,15 +13,27 @@ import "image/color"
 // presumably ones that maintain some data structure to achieve performance
 // advantages over linear search.
 type Palette interface {
-	Convert(color.Color) color.Color
+	IndexNear(color.Color) int
+	ColorNear(color.Color) color.Color
 	ColorPalette() color.Palette
 }
+
+var _ Palette = LinearPalette{}
+var _ Palette = &TreePalette{}
 
 // LinearPalette implements the Palette interface with color.Palette
 // and has no optimizations.
 type LinearPalette struct {
 	// Convert method of Palette satisfied by method of color.Palette.
 	color.Palette
+}
+
+func (p LinearPalette) IndexNear(c color.Color) int {
+	return p.Palette.Index(c)
+}
+
+func (p LinearPalette) ColorNear(c color.Color) color.Color {
+	return p.Palette.Convert(c)
 }
 
 // ColorPalette satisfies interface Palette.
@@ -32,8 +44,10 @@ func (p LinearPalette) ColorPalette() color.Palette {
 }
 
 type TreePalette struct {
-	Type  int
-	Color color.RGBA64 // for TLeaf
+	Type int
+	// for TLeaf
+	Index int
+	Color color.RGBA64
 	// for TSplit
 	Split     uint32
 	Low, High *TreePalette
@@ -46,17 +60,30 @@ const (
 	TSplitB
 )
 
-func (t *TreePalette) Convert(c color.Color) (p color.Color) {
+func (t *TreePalette) IndexNear(c color.Color) (i int) {
+	if t == nil {
+		return -1
+	}
+	t.search(c, func(leaf *TreePalette) { i = leaf.Index })
+	return
+}
+
+func (t *TreePalette) ColorNear(c color.Color) (p color.Color) {
 	if t == nil {
 		return color.RGBA64{0x7fff, 0x7fff, 0x7fff, 0xfff}
 	}
+	t.search(c, func(leaf *TreePalette) { p = leaf.Color })
+	return
+}
+
+func (t *TreePalette) search(c color.Color, f func(leaf *TreePalette)) {
 	r, g, b, _ := c.RGBA()
 	var lt bool
-	var search func(*TreePalette)
-	search = func(t *TreePalette) {
+	var s func(*TreePalette)
+	s = func(t *TreePalette) {
 		switch t.Type {
 		case TLeaf:
-			p = t.Color
+			f(t)
 			return
 		case TSplitR:
 			lt = r < t.Split
@@ -66,12 +93,12 @@ func (t *TreePalette) Convert(c color.Color) (p color.Color) {
 			lt = b < t.Split
 		}
 		if lt {
-			search(t.Low)
+			s(t.Low)
 		} else {
-			search(t.High)
+			s(t.High)
 		}
 	}
-	search(t)
+	s(t)
 	return
 }
 
