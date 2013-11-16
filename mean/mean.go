@@ -39,11 +39,11 @@ type Quantizer int
 var _ quant.Quantizer = Quantizer(0)
 var _ draw.Quantizer = Quantizer(0)
 
-// Image performs color quantization and returns a paletted image.
+// Paletted performs color quantization and returns a paletted image.
 //
-// Returned is a paletted image with no more than q colors.  Note though
+// Returned is a new image.Paletted with no more than q colors.  Note though
 // that image.Paletted is limited to 256 colors.
-func (q Quantizer) Image(img image.Image) *image.Paletted {
+func (q Quantizer) Paletted(img image.Image) *image.Paletted {
 	n := int(q)
 	if n > 256 {
 		n = 256

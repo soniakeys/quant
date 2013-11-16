@@ -41,7 +41,7 @@ func TestMedian(t *testing.T) {
 				t.Fatal(err) // probably can't create any others
 			}
 			var q quant.Quantizer = median.Quantizer(n)
-			if err = png.Encode(fq, q.Image(img)); err != nil {
+			if err = png.Encode(fq, q.Paletted(img)); err != nil {
 				t.Fatal(err) // any problem is probably a problem for all
 			}
 		}
