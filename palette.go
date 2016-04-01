@@ -8,7 +8,7 @@ import (
 	"image/color"
 )
 
-// Palette is a palette of color.Colors, much like color.Pallete of the
+// Palette is a palette of color.Colors, much like color.Palette of the
 // standard library.
 //
 // It is defined as an interface here to allow more general implementations,

@@ -14,7 +14,7 @@ import (
 )
 
 // TestMean tests the mean quantizer on png files found in the source
-// directory.  Output files are prefixed with _mean_.  Files begining with
+// directory.  Output files are prefixed with _mean_.  Files beginning with
 // _ are skipped when scanning for input files.  Note nothing is tested
 // with a fresh source tree--drop a png or two in the source directory
 // before testing to give the test something to work on.  Png files in the

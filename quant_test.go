@@ -16,7 +16,7 @@ import (
 )
 
 // TestDither tests Sierra24A on png files found in the source directory.
-// Output files are prefixed with _dither_256_.  Files begining with _
+// Output files are prefixed with _dither_256_.  Files beginning with _
 // are skipped when scanning for input files.  Thus nothing is tested
 // with a fresh source tree--drop a png or two in the source directory
 // before testing to give the test something to work on.
@@ -61,7 +61,7 @@ func TestDitherMedianDraw(t *testing.T) {
 }
 
 // TestDither tests Sierra24A on png files found in the source directory.
-// Output files are prefixed with _dither_256_.  Files begining with _
+// Output files are prefixed with _dither_256_.  Files beginning with _
 // are skipped when scanning for input files.  Thus nothing is tested
 // with a fresh source tree--drop a png or two in the source directory
 // before testing to give the test something to work on.
