@@ -3,7 +3,10 @@
 
 package quant
 
-import "image/color"
+import (
+	"image"
+	"image/color"
+)
 
 // Palette is a palette of color.Colors, much like color.Pallete of the
 // standard library.
@@ -12,6 +15,7 @@ import "image/color"
 // presumably ones that maintain some data structure to achieve performance
 // advantages over linear search.
 type Palette interface {
+	Len() int
 	IndexNear(color.Color) int
 	ColorNear(color.Color) color.Color
 	ColorPalette() color.Palette
@@ -47,6 +51,8 @@ func (p LinearPalette) ColorPalette() color.Palette {
 	return p.Palette
 }
 
+func (p LinearPalette) Len() int { return len(p.Palette) }
+
 // TreePalette implements the Palette interface with a binary tree.
 //
 // XNear methods run in O(log n) time for palette size.
@@ -57,6 +63,8 @@ type TreePalette struct {
 	Leaves int
 	Root   *Node
 }
+
+func (p TreePalette) Len() int { return p.Leaves }
 
 // Node is a TreePalette node.  It is exported for access by quantizer
 // packages and otherwise can be ignored for typical use of this package.
@@ -148,4 +156,18 @@ func (t TreePalette) Walk(f func(leaf *Node, i int)) {
 		w(n.High)
 	}
 	w(t.Root)
+}
+
+func Paletted(p Palette, img image.Image) *image.Paletted {
+	if p.Len() > 256 {
+		return nil
+	}
+	b := img.Bounds()
+	pi := image.NewPaletted(b, p.ColorPalette())
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			pi.SetColorIndex(x, y, uint8(p.IndexNear(img.At(x, y))))
+		}
+	}
+	return pi
 }
