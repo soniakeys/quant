@@ -25,6 +25,7 @@ import (
 	"math"
 
 	"github.com/soniakeys/quant"
+	"github.com/soniakeys/quant/internal"
 )
 
 // Quantizer methods implement mean cut color quantization.
@@ -85,6 +86,8 @@ func (Quantizer) Quantize(p color.Palette, m image.Image) color.Palette {
 type quantizer struct {
 	img image.Image // original image
 	cs  []cluster   // len(cs) is the desired number of colors
+
+	pxRGBA func(x, y int) (r, g, b, a uint32) // function to get original image RGBA color values
 }
 
 type point struct{ x, y int32 }
@@ -107,7 +110,7 @@ const (
 
 func newQuantizer(img image.Image, n int) *quantizer {
 	if n < 1 {
-		return &quantizer{img, nil}
+		return &quantizer{img: img, pxRGBA: internal.PxRGBAfunc(img)}
 	}
 	// Make list of all pixels in image.
 	b := img.Bounds()
@@ -123,7 +126,7 @@ func newQuantizer(img image.Image, n int) *quantizer {
 	// Make clusters, populate first cluster with complete pixel list.
 	cs := make([]cluster, n)
 	cs[0].px = px
-	return &quantizer{img, cs}
+	return &quantizer{img: img, cs: cs, pxRGBA: internal.PxRGBAfunc(img)}
 }
 
 // Cluster by repeatedly splitting clusters in two stages.  For the first
@@ -187,7 +190,7 @@ func (q *quantizer) setPriority(c *cluster, early bool) {
 	minG := uint32(math.MaxUint32)
 	minB := uint32(math.MaxUint32)
 	for _, p := range c.px {
-		r, g, b, _ := q.img.At(int(p.x), int(p.y)).RGBA()
+		r, g, b, _ := q.pxRGBA(int(p.x), int(p.y))
 		if r < minR {
 			minR = r
 		}
@@ -237,17 +240,17 @@ func (q *quantizer) cutValue(c *cluster, early bool) uint32 {
 	switch c.widestDim {
 	case rgbR:
 		for _, p := range c.px {
-			r, _, _, _ := q.img.At(int(p.x), int(p.y)).RGBA()
+			r, _, _, _ := q.pxRGBA(int(p.x), int(p.y))
 			sum += uint64(r)
 		}
 	case rgbG:
 		for _, p := range c.px {
-			_, g, _, _ := q.img.At(int(p.x), int(p.y)).RGBA()
+			_, g, _, _ := q.pxRGBA(int(p.x), int(p.y))
 			sum += uint64(g)
 		}
 	case rgbB:
 		for _, p := range c.px {
-			_, _, b, _ := q.img.At(int(p.x), int(p.y)).RGBA()
+			_, _, b, _ := q.pxRGBA(int(p.x), int(p.y))
 			sum += uint64(b)
 		}
 	}
@@ -270,7 +273,7 @@ func (q *quantizer) split(s, c *cluster, m uint32) {
 	last := len(px) - 1
 	for i <= last {
 		// Get color value in appropriate dimension.
-		r, g, b, _ := q.img.At(int(px[i].x), int(px[i].y)).RGBA()
+		r, g, b, _ := q.pxRGBA(int(px[i].x), int(px[i].y))
 		switch s.widestDim {
 		case rgbR:
 			v = r
@@ -300,7 +303,7 @@ func (qz *quantizer) paletted() *image.Paletted {
 		// Average values in cluster to get palette color.
 		var rsum, gsum, bsum int64
 		for _, p := range px {
-			r, g, b, _ := qz.img.At(int(p.x), int(p.y)).RGBA()
+			r, g, b, _ := qz.pxRGBA(int(p.x), int(p.y))
 			rsum += int64(r)
 			gsum += int64(g)
 			bsum += int64(b)
@@ -327,7 +330,7 @@ func (qz *quantizer) palette() quant.Palette {
 		// Average values in cluster to get palette color.
 		var rsum, gsum, bsum int64
 		for _, p := range px {
-			r, g, b, _ := qz.img.At(int(p.x), int(p.y)).RGBA()
+			r, g, b, _ := qz.pxRGBA(int(p.x), int(p.y))
 			rsum += int64(r)
 			gsum += int64(g)
 			bsum += int64(b)
